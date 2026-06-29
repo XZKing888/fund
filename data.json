@@ -5,5 +5,10 @@
       "date": "2026-06-29",
       "val": 100000
     }
-  ]
+  ],
+  "fee": {
+    "type": "performance",
+    "perfRate": 20,
+    "mgmtRate": 2
+  }
 }
