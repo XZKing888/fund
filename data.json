@@ -1,1 +1,9 @@
-{"name":"我的基金","records":[]}
+{
+  "name": "我的基金",
+  "records": [],
+  "fee": {
+    "type": "performance",
+    "perfRate": 20,
+    "mgmtRate": 2
+  }
+}
