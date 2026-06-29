@@ -1,1 +1,1 @@
-{"name":"测试基金","records":[{"date":"2026-06-01","val":10000},{"date":"2026-06-02","val":24000},{"date":"2026-06-03","val":26400}],"investors":[{"name":"张三","amount":10000,"date":"2026-06-01","pid":"testpid1"},{"name":"李四","amount":12000,"date":"2026-06-02","pid":"testpid2"}],"fee":{"type":"performance","perfRate":20,"mgmtRate":0}}
+{"name":"我的基金","records":[]}
