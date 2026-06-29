@@ -391,7 +391,13 @@ function computeRoster(){
     const totalFee=mgmt+perf, net=gross-totalFee;
     return {...p,mv,gross,totalFee,net,grossPct:p.deposit?gross/p.deposit*100:0,netPct:p.deposit?net/p.deposit*100:0};
   }).sort((a,b)=>a.name<b.name?-1:1);
-  return {recs,deps,alloc,people,navLatest,unitsTotal:units,fee};
+  // 防呆：第一笔入金那天，基金总额若明显大于已登记入金，说明有"没登记主人"的钱
+  let warning=null;
+  const firstDate=dates[0];
+  const sumFirst=deps.filter(x=>x.date<=firstDate).reduce((s,x)=>s+(Number(x.amount)||0),0);
+  const v0=valueOn(firstDate);
+  if(v0 > sumFirst*1.02 + 1) warning={unregistered:v0-sumFirst, firstDate, v0, sumFirst};
+  return {recs,deps,alloc,people,navLatest,unitsTotal:units,fee,warning};
 }
 function ensurePids(){
   if(!Array.isArray(state.investors)) return false;
@@ -405,9 +411,14 @@ function renderRoster(){
   const id=document.getElementById("invDate"); if(id&&id.value===""&&document.activeElement!==id) id.value=today();
   if(ensurePids() && canEdit() && !saving) persist();
   const invs=state.investors||[];
-  const {people,navLatest,fee}=computeRoster();
+  const {people,navLatest,fee,warning}=computeRoster();
   const feeOn=!!(fee&&fee.type&&fee.type!=="none");
   let html="";
+  if(warning){
+    html+=`<div style="border:1px solid var(--err);background:#f0463c1a;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.6;">
+      ⚠️ <b>盈亏可能算错：</b>${warning.firstDate} 时基金总额是 <b>${fmt(warning.v0)}</b>，但只登记了 <b>${fmt(warning.sumFirst)}</b> 的入金，还有 <b>${fmt(warning.unregistered)}</b> 没有对应的投资人。<br>
+      份额法要求<b>每一分钱都登记成某个人</b>。请把这笔（多半是你自己的本金）也「添加入金」登记进去；并确保有人入金后，把当天「账户总资产」也更新成含新入金的金额。</div>`;
+  }
   if(invs.length){
     html+=`<div style="margin-bottom:14px;"><div class="hint" style="margin-bottom:6px;">入金登记</div><table><thead><tr><th>姓名</th><th>入金额</th><th>入金日期</th><th></th></tr></thead><tbody>`;
     invs.forEach((d,i)=>{ html+=`<tr><td>${d.name||"(未命名)"}</td><td>${fmt(d.amount)}</td><td>${d.date}</td><td><button class="danger" data-invdel="${i}">删除</button></td></tr>`; });
