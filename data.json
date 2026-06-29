@@ -15,12 +15,5 @@
     "perfRate": 20,
     "mgmtRate": 2
   },
-  "investors": [
-    {
-      "name": "醒兜",
-      "amount": 10000,
-      "date": "2026-06-29",
-      "pid": "d0qmlpcv"
-    }
-  ]
+  "investors": []
 }
