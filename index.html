@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>基金收益表</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2129; --panel2:#222c37; --line:#2c3744;
+    --text:#e6edf3; --muted:#8b98a5; --accent:#3b82f6;
+    --up:#f0463c; --down:#16a34a; /* 中国习惯：红涨绿跌 */
+    --ok:#16a34a; --warn:#eab308; --err:#f0463c;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);padding:24px;line-height:1.5;}
+  .wrap{max-width:1000px;margin:0 auto;}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px;}
+  #fundName{font-size:26px;font-weight:700;background:transparent;border:none;color:var(--text);border-bottom:2px dashed transparent;padding:2px 4px;min-width:160px;}
+  #fundName:focus{outline:none;border-bottom-color:var(--accent);}
+  #fundName:read-only{cursor:default;}
+  .spacer{flex:1;}
+  .status{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:5px 12px;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);}
+  .dot.ok{background:var(--ok);} .dot.warn{background:var(--warn);} .dot.err{background:var(--err);}
+  #adminBtn{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:20px;padding:5px 14px;font-size:12px;cursor:pointer;}
+  #adminBtn:hover{color:var(--text);}
+  .subhint{font-size:12px;color:var(--muted);margin-bottom:18px;padding-left:4px;}
+
+  #adminPanel{display:none;background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:16px 18px;margin-bottom:20px;}
+  #adminPanel h3{font-size:14px;margin-bottom:10px;}
+  #adminPanel p{font-size:12px;color:var(--muted);margin-bottom:10px;}
+  #adminPanel a{color:var(--accent);}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+  .card .label{font-size:12px;color:var(--muted);}
+  .card .value{font-size:22px;font-weight:700;margin-top:4px;}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:20px;}
+  .panel h2{font-size:15px;color:var(--muted);font-weight:600;margin-bottom:14px;}
+  .panel.mine{border-color:var(--accent);}
+  .editonly{display:none;}        /* 默认隐藏，解锁后显示 */
+  body.can-edit .editonly{display:block;}
+  body.can-edit td .editonly{display:inline-block;}
+
+  .form-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .field{display:flex;flex-direction:column;gap:5px;}
+  .field label{font-size:12px;color:var(--muted);}
+  input[type=date],input[type=number],input[type=text],input[type=password]{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;font-size:14px;}
+  input:focus{outline:none;border-color:var(--accent);}
+  button.primary{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;}
+  button.primary:hover{filter:brightness(1.1);}
+  button.primary:disabled{opacity:.5;cursor:not-allowed;}
+  button.danger{background:transparent;border:1px solid var(--line);color:var(--up);padding:5px 10px;font-size:12px;cursor:pointer;}
+  .hint{font-size:12px;color:var(--muted);}
+
+  #chartWrap{position:relative;}
+  canvas{width:100%;display:block;}
+  #tip{position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;display:none;white-space:nowrap;transform:translate(-50%,-115%);}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{padding:11px 10px;text-align:right;border-bottom:1px solid var(--line);}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--muted);font-weight:600;font-size:12px;}
+  tbody tr:hover{background:#ffffff08;}
+  .up{color:var(--up);} .down{color:var(--down);} .flat{color:var(--muted);}
+  .empty{text-align:center;color:var(--muted);padding:30px;}
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .mini{font-size:12px;color:var(--muted);cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;}
+  footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px;display:flex;gap:18px;justify-content:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <input id="fundName" value="我的基金" title="点击修改基金名称" readonly>
+    <div class="spacer"></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusTxt">加载中…</span></div>
+    <button id="adminBtn">管理</button>
+  </header>
+  <div class="subhint" id="subhint"></div>
+
+  <div id="adminPanel">
+    <h3>管理（只有你需要操作这里）</h3>
+    <p>粘贴你的 GitHub 访问密钥（Token）解锁编辑。密钥<b>只保存在你这台电脑的浏览器里</b>，不会出现在网页中，别人看不到。不知道怎么获取？看桌面上的《上线指南》。</p>
+    <div class="form-row">
+      <div class="field"><label>GitHub Token</label><input type="password" id="tokenInput" placeholder="ghp_... 或 github_pat_..." style="min-width:280px;"></div>
+      <button class="primary" id="unlockBtn">解锁编辑</button>
+      <button class="danger" id="logoutBtn" style="display:none;">退出编辑（清除密钥）</button>
+    </div>
+    <p id="adminMsg" style="margin-top:10px;margin-bottom:0;"></p>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">最新净值/金额</div><div class="value" id="cLatest">—</div></div>
+    <div class="card"><div class="label">较上次变动</div><div class="value" id="cChange">—</div></div>
+    <div class="card"><div class="label">累计变动</div><div class="value" id="cTotal">—</div></div>
+    <div class="card"><div class="label">记录天数</div><div class="value" id="cDays">0</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>走势图（基金整体，大家一样）</h2>
+    <div id="chartWrap"><canvas id="chart" height="320"></canvas><div id="tip"></div></div>
+  </div>
+
+  <div class="panel mine">
+    <h2>我的收益（只算你自己这一份 · 设置只存在你的浏览器里，别人看不到）</h2>
+    <div class="form-row" style="margin-bottom:6px;">
+      <div class="field"><label>我的本金（元）</label><input type="number" id="myPrincipal" step="any" placeholder="例如 10000"></div>
+      <div class="field"><label>我的入场日期</label><input type="date" id="myDate"></div>
+      <button class="primary" id="mySaveBtn">保存我的设置</button>
+      <button class="mini" id="myClearBtn" style="margin-left:4px;">清除</button>
+    </div>
+    <div id="myResult" style="margin-top:14px;"></div>
+  </div>
+
+  <div class="panel editonly">
+    <h2>新增 / 更新记录</h2>
+    <div class="form-row">
+      <div class="field"><label>日期</label><input type="date" id="inDate"></div>
+      <div class="field"><label>净值 / 累计金额</label><input type="number" id="inVal" step="any" placeholder="例如 10523.6"></div>
+      <button class="primary" id="addBtn">保存记录</button>
+      <span class="hint">同一天再次保存会覆盖当天数值</span>
+    </div>
+  </div>
+
+  <div class="panel editonly">
+    <h2>收费设置（管理费 / 盈利分成 · 只有你能改，对所有查看者生效）</h2>
+    <div class="form-row">
+      <div class="field"><label>收费方式</label>
+        <select id="feeType" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;font-size:14px;">
+          <option value="none">不收费</option>
+          <option value="performance">盈利分成（只对盈利抽成，亏不收）</option>
+          <option value="fixed">按本金固定比例（年化，按天折算）</option>
+          <option value="both">两者都有（2/20 模式）</option>
+        </select>
+      </div>
+      <div class="field"><label>盈利分成 %</label><input type="number" id="feePerf" step="any" placeholder="如 20"></div>
+      <div class="field"><label>管理费 年化 %</label><input type="number" id="feeMgmt" step="any" placeholder="如 2"></div>
+      <button class="primary" id="feeSaveBtn">保存收费设置</button>
+    </div>
+    <p class="hint" style="margin-top:8px;">推荐「盈利分成 20%」：赚才收、亏不收，朋友拼盘最公平。设置后所有人「我的收益」会显示扣费后的实得收益。</p>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <h2 style="margin:0;">明细</h2>
+      <button class="mini editonly" id="clearBtn">清空全部</button>
+    </div>
+    <table>
+      <thead><tr><th>日期</th><th>净值/金额</th><th>当日变动</th><th>当日收益率</th><th class="editonly"></th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    <button class="mini" id="exportBtn">导出备份</button>
+    <button class="mini editonly" id="importBtn">导入备份</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   配置区：上线时只需把下面两行改成你自己的（看《上线指南》）
+   ============================================================ */
+const CONFIG = {
+  owner:  "XZKing888",   // 你的 GitHub 用户名
+  repo:   "fund",        // 你的仓库名
+  branch: "main",
+  path:   "data.json"
+};
+/* ============================================================ */
+
+const O=CONFIG.owner, R=CONFIG.repo, B=CONFIG.branch, P=CONFIG.path;
+const CLOUD = !!(O && R);                 // 配了 owner+repo 才启用云端
+const LKEY = "fund_tracker_v1";           // 本地缓存
+const TKEY = "fund_github_token";         // 你的密钥（仅本机）
+const MKEY = "fund_my_position";           // 我的本金/入场日（每个查看者各自本机）
+let token = CLOUD ? (localStorage.getItem(TKEY)||"") : "";
+let state = { name:"我的基金", records:[] };
+let saving = false;
+
+/* ---------- 工具 ---------- */
+const fmt = n => Number(n).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+const cls = n => n>0?"up":n<0?"down":"flat";
+const sign = n => (n>0?"+":"") + fmt(n);
+const signPct = n => (n>0?"+":"") + n.toFixed(2) + "%";
+function b64(str){ const by=new TextEncoder().encode(str); let s=""; by.forEach(b=>s+=String.fromCharCode(b)); return btoa(s); }
+function canEdit(){ return !CLOUD || !!token; }
+function localSave(){ try{ localStorage.setItem(LKEY, JSON.stringify(state)); }catch(e){} }
+function localLoad(){ try{ const s=JSON.parse(localStorage.getItem(LKEY)); if(s&&Array.isArray(s.records)) return s; }catch(e){} return null; }
+
+/* ---------- 状态条 ---------- */
+function setStatus(kind,txt){ document.getElementById("dot").className="dot "+kind; document.getElementById("statusTxt").textContent=txt; }
+function refreshSubhint(){
+  const el=document.getElementById("subhint");
+  if(!CLOUD){ el.textContent="本地模式：数据只存在你这台电脑，别人看不到。配置上线后即可分享（见《上线指南》）。"; }
+  else if(canEdit()){ el.textContent="云端已连接 · 你可以编辑，所有人刷新即可看到最新数据。"; }
+  else { el.textContent="云端已连接 · 当前为只读浏览。"; }
+}
+
+/* ---------- 云端读写（GitHub）---------- */
+async function cloudLoad(){
+  const url=`https://api.github.com/repos/${O}/${R}/contents/${encodeURIComponent(P)}?ref=${B}&_=${Date.now()}`;
+  const headers={Accept:"application/vnd.github.raw"};
+  if(token) headers.Authorization="Bearer "+token;
+  const res=await fetch(url,{headers,cache:"no-store"});
+  if(res.status===404) return {name:"我的基金",records:[]};   // 还没创建数据文件
+  if(!res.ok) throw new Error("HTTP "+res.status);
+  const s=JSON.parse(await res.text());
+  if(!s||!Array.isArray(s.records)) throw new Error("数据格式错误");
+  return s;
+}
+async function cloudSave(){
+  const base=`https://api.github.com/repos/${O}/${R}/contents/${encodeURIComponent(P)}`;
+  let sha;
+  const g=await fetch(base+`?ref=${B}&_=${Date.now()}`,{headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json"},cache:"no-store"});
+  if(g.ok) sha=(await g.json()).sha;
+  const body={message:"更新基金数据",content:b64(JSON.stringify(state,null,2)),branch:B};
+  if(sha) body.sha=sha;
+  const p=await fetch(base,{method:"PUT",headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!p.ok){ let m=p.status; try{ m=(await p.json()).message||m; }catch(e){} throw new Error(m); }
+}
+// 任何改动统一走这里：先存本地缓存→再同步云端
+async function persist(){
+  localSave();
+  if(CLOUD && token){
+    saving=true; setStatus("warn","保存中…"); applyEditState();
+    try{ await cloudSave(); setStatus("ok","☁ 已连接 · 可编辑"); }
+    catch(e){ setStatus("err","保存失败"); alert("保存到云端失败："+e.message+"\n（数据已暂存本机，可稍后重试）"); }
+    finally{ saving=false; applyEditState(); }
+  }
+}
+
+/* ---------- 渲染 ---------- */
+function applyEditState(){
+  document.body.classList.toggle("can-edit", canEdit());
+  document.getElementById("fundName").readOnly = !canEdit();
+  const ab=document.getElementById("addBtn"); if(ab) ab.disabled=saving;
+}
+function render(){
+  document.getElementById("fundName").value = state.name||"我的基金";
+  const recs=[...state.records].sort((a,b)=>a.date<b.date?-1:1);
+  const cL=document.getElementById("cLatest"),cC=document.getElementById("cChange"),cT=document.getElementById("cTotal"),cD=document.getElementById("cDays");
+  cD.textContent=recs.length;
+  if(recs.length){
+    const last=recs[recs.length-1].val; cL.textContent=fmt(last);
+    if(recs.length>=2){ const prev=recs[recs.length-2].val,d=last-prev,p=prev!==0?d/prev*100:0; cC.innerHTML=`<span class="${cls(d)}">${sign(d)}　${signPct(p)}</span>`; } else cC.textContent="—";
+    const first=recs[0].val,td=last-first,tp=first!==0?td/first*100:0; cT.innerHTML=`<span class="${cls(td)}">${sign(td)}　${signPct(tp)}</span>`;
+  } else { cL.textContent=cC.textContent=cT.textContent="—"; }
+
+  const tb=document.getElementById("tbody");
+  if(!recs.length){ tb.innerHTML=`<tr><td colspan="5" class="empty">还没有数据${canEdit()?"，在上方添加第一条记录吧":""}</td></tr>`; }
+  else{
+    tb.innerHTML=recs.slice().reverse().map((r,i,arr)=>{
+      const prev=arr[i+1]; let chg="—",pct="—",cc="flat";
+      if(prev){ const d=r.val-prev.val,p=prev.val!==0?d/prev.val*100:0; chg=sign(d);pct=signPct(p);cc=cls(d); }
+      return `<tr><td>${r.date}</td><td>${fmt(r.val)}</td><td class="${cc}">${chg}</td><td class="${cc}">${pct}</td>
+        <td class="editonly"><button class="danger" data-del="${r.date}">删除</button></td></tr>`;
+    }).join("");
+    tb.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{ if(saving)return; state.records=state.records.filter(x=>x.date!==b.dataset.del); render(); await persist(); });
+  }
+  applyEditState(); populateFee(); drawChart(recs); renderMine();
+}
+
+/* ---------- 我的收益（每个查看者各自本机，不上传云端）---------- */
+function loadMine(){ try{const m=JSON.parse(localStorage.getItem(MKEY)); if(m&&typeof m.principal==="number") return m;}catch(e){} return null; }
+function saveMine(m){ try{localStorage.setItem(MKEY,JSON.stringify(m));}catch(e){} }
+function feeCalc(principal,baseVal,baseDate,val,date,fee){
+  const gross=principal*val/baseVal-principal;
+  let mgmt=0,perf=0;
+  const days=Math.max(0,(new Date(date)-new Date(baseDate))/86400000);
+  if(fee.type==="fixed"||fee.type==="both") mgmt=principal*(Number(fee.mgmtRate)||0)/100*days/365;
+  const pbase=fee.type==="both"?Math.max(0,gross-mgmt):Math.max(0,gross);
+  if(fee.type==="performance"||fee.type==="both") perf=pbase*(Number(fee.perfRate)||0)/100;
+  return {gross,mgmt,perf,totalFee:mgmt+perf,net:gross-mgmt-perf};
+}
+function renderMine(){
+  const recs=[...state.records].sort((a,b)=>a.date<b.date?-1:1);
+  const box=document.getElementById("myResult"); if(!box) return;
+  const m=loadMine(), pe=document.getElementById("myPrincipal"), de=document.getElementById("myDate");
+  if(m){ if(document.activeElement!==pe&&pe.value==="")pe.value=m.principal; if(document.activeElement!==de&&de.value==="")de.value=m.joinDate; }
+  else if(de&&de.value===""){ de.value=recs.length?recs[0].date:today(); }
+  if(!m){ box.innerHTML=`<p class="hint">填写你的本金和入场日期，点「保存我的设置」，就能看到你自己那一份的收益。这些设置只存在你这台设备上，别人看不到。</p>`; return; }
+  if(!recs.length){ box.innerHTML=`<p class="hint">基金还没有数据，等更新后这里会自动算出你的收益。</p>`; return; }
+  let base=null; for(const r of recs){ if(r.date<=m.joinDate) base=r; } if(!base) base=recs[0];
+  const baseVal=base.val, latest=recs[recs.length-1].val, lastDate=recs[recs.length-1].date;
+  if(!baseVal){ box.innerHTML=`<p class="hint">入场基准数值为 0，无法计算收益。</p>`; return; }
+  const fee=state.fee||{type:"none"};
+  const c=feeCalc(m.principal,baseVal,base.date,latest,lastDate,fee);
+  const grossMv=m.principal+c.gross, netMv=m.principal+c.net, grossPct=c.gross/m.principal*100, netPct=c.net/m.principal*100;
+  const series=recs.filter(r=>r.date>=base.date).map(r=>({date:r.date,val:m.principal+feeCalc(m.principal,baseVal,base.date,r.val,r.date,fee).net}));
+  let cards;
+  if(fee.type==="none"){
+    cards=`<div class="card"><div class="label">我的本金</div><div class="value">${fmt(m.principal)}</div></div>
+       <div class="card"><div class="label">当前市值</div><div class="value">${fmt(grossMv)}</div></div>
+       <div class="card"><div class="label">我的收益</div><div class="value ${cls(c.gross)}">${sign(c.gross)}</div></div>
+       <div class="card"><div class="label">我的收益率</div><div class="value ${cls(c.gross)}">${signPct(grossPct)}</div></div>`;
+  } else {
+    cards=`<div class="card"><div class="label">我的本金</div><div class="value">${fmt(m.principal)}</div></div>
+       <div class="card"><div class="label">税前收益</div><div class="value ${cls(c.gross)}">${sign(c.gross)}</div></div>
+       <div class="card"><div class="label">管理费 / 分成</div><div class="value ${c.totalFee>0?'down':'flat'}">${c.totalFee>0?'-'+fmt(c.totalFee):fmt(0)}</div></div>
+       <div class="card"><div class="label">实得收益</div><div class="value ${cls(c.net)}">${sign(c.net)}</div></div>
+       <div class="card"><div class="label">实得收益率</div><div class="value ${cls(c.net)}">${signPct(netPct)}</div></div>
+       <div class="card"><div class="label">实得市值</div><div class="value">${fmt(netMv)}</div></div>`;
+  }
+  const days=Math.round((new Date(lastDate)-new Date(base.date))/86400000);
+  const feeNote = fee.type==="none" ? "" :
+    fee.type==="performance" ? ` 已扣盈利分成 ${Number(fee.perfRate)||0}%（仅对盈利部分，亏损不收）。` :
+    fee.type==="fixed" ? ` 已扣管理费：本金年化 ${Number(fee.mgmtRate)||0}%，按持有 ${days} 天折算。` :
+    ` 已扣管理费 ${Number(fee.mgmtRate)||0}%/年（持有 ${days} 天）+ 盈利分成 ${Number(fee.perfRate)||0}%。`;
+  box.innerHTML=
+    `<div class="cards" style="margin-bottom:16px;">${cards}</div>
+     <div style="position:relative;"><canvas id="myChart" height="240"></canvas><div id="myTip" style="position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;display:none;white-space:nowrap;transform:translate(-50%,-115%);"></div></div>
+     <p class="hint" style="margin-top:10px;">按比例计算：你的涨跌幅 = 基金总额相对你入场日的涨跌幅；基准取你入场当天或之前最近一条记录（${base.date} 总额 ${fmt(baseVal)}）。${feeNote}走势为扣费后的实得市值。</p>`;
+  drawChart(series,"myChart","myTip");
+}
+document.getElementById("mySaveBtn").onclick=()=>{
+  const p=parseFloat(document.getElementById("myPrincipal").value), d=document.getElementById("myDate").value;
+  if(isNaN(p)||p<=0){alert("请输入你的本金（大于 0）");return;}
+  if(!d){alert("请选择你的入场日期");return;}
+  saveMine({principal:p,joinDate:d}); renderMine();
+};
+document.getElementById("myClearBtn").onclick=()=>{ localStorage.removeItem(MKEY); document.getElementById("myPrincipal").value=""; document.getElementById("myDate").value=""; renderMine(); };
+
+/* ---------- 收费设置（管理员，存入共享数据）---------- */
+function populateFee(){
+  const fe=document.getElementById("feeType"); if(!fe) return;
+  const f=state.fee||{type:"none"};
+  if(document.activeElement!==fe) fe.value=f.type||"none";
+  const pf=document.getElementById("feePerf"), mf=document.getElementById("feeMgmt");
+  if(document.activeElement!==pf) pf.value=(f.perfRate!=null?f.perfRate:"");
+  if(document.activeElement!==mf) mf.value=(f.mgmtRate!=null?f.mgmtRate:"");
+}
+document.getElementById("feeSaveBtn").onclick=async()=>{
+  if(saving)return;
+  state.fee={type:document.getElementById("feeType").value,
+    perfRate:parseFloat(document.getElementById("feePerf").value)||0,
+    mgmtRate:parseFloat(document.getElementById("feeMgmt").value)||0};
+  render(); await persist();
+};
+
+/* ---------- 走势图（纯 canvas，无需联网）---------- */
+let chartPts=[];
+function drawChart(recs,cvId,tipId){
+  const cv=document.getElementById(cvId||"chart"),tip=document.getElementById(tipId||"tip"),dpr=window.devicePixelRatio||1;
+  const w=cv.clientWidth,h=320; cv.width=w*dpr; cv.height=h*dpr;
+  const ctx=cv.getContext("2d"); ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h); chartPts=[];
+  if(recs.length<1){ ctx.fillStyle="#8b98a5";ctx.font="14px sans-serif";ctx.textAlign="center";ctx.fillText("暂无数据",w/2,h/2); return; }
+  const padL=58,padR=18,padT=18,padB=34,vals=recs.map(r=>r.val);
+  let mn=Math.min(...vals),mx=Math.max(...vals); if(mn===mx){mn-=1;mx+=1;}
+  const rng=mx-mn,pd=rng*0.12; mn-=pd; mx+=pd;
+  const x=i=>recs.length===1?padL+(w-padL-padR)/2:padL+(w-padL-padR)*i/(recs.length-1);
+  const y=v=>padT+(h-padT-padB)*(1-(v-mn)/(mx-mn));
+  ctx.strokeStyle="#26313d";ctx.fillStyle="#8b98a5";ctx.font="11px sans-serif";ctx.textAlign="right";
+  for(let i=0;i<=4;i++){const v=mn+(mx-mn)*i/4,yy=y(v);ctx.beginPath();ctx.moveTo(padL,yy);ctx.lineTo(w-padR,yy);ctx.stroke();ctx.fillText(fmt(v),padL-8,yy+4);}
+  ctx.textAlign="center";
+  const idxs=recs.length<=1?[0]:[0,Math.floor((recs.length-1)/2),recs.length-1];
+  [...new Set(idxs)].forEach(i=>ctx.fillText(recs[i].date.slice(5),x(i),h-12));
+  recs.forEach((r,i)=>chartPts.push({px:x(i),py:y(r.val),r}));
+  const up=recs[recs.length-1].val>=recs[0].val,color=up?"#f0463c":"#16a34a";
+  const grad=ctx.createLinearGradient(0,padT,0,h-padB);grad.addColorStop(0,color+"55");grad.addColorStop(1,color+"00");
+  if(recs.length>1){ctx.beginPath();ctx.moveTo(chartPts[0].px,h-padB);chartPts.forEach(p=>ctx.lineTo(p.px,p.py));ctx.lineTo(chartPts[chartPts.length-1].px,h-padB);ctx.closePath();ctx.fillStyle=grad;ctx.fill();}
+  ctx.beginPath();chartPts.forEach((p,i)=>i?ctx.lineTo(p.px,p.py):ctx.moveTo(p.px,p.py));ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineJoin="round";ctx.stroke();
+  chartPts.forEach(p=>{ctx.beginPath();ctx.arc(p.px,p.py,3.2,0,7);ctx.fillStyle=color;ctx.fill();ctx.strokeStyle="#1a2129";ctx.lineWidth=1.5;ctx.stroke();});
+  cv.onmousemove=e=>{const rect=cv.getBoundingClientRect(),mxx=e.clientX-rect.left;let best=null,bd=1e9;chartPts.forEach(p=>{const d=Math.abs(p.px-mxx);if(d<bd){bd=d;best=p;}});if(best&&bd<40){tip.style.display="block";tip.style.left=best.px+"px";tip.style.top=best.py+"px";tip.innerHTML=`<b>${best.r.date}</b><br>${fmt(best.r.val)}`;}else tip.style.display="none";};
+  cv.onmouseleave=()=>tip.style.display="none";
+}
+
+/* ---------- 事件 ---------- */
+const today=()=>new Date().toISOString().slice(0,10);
+document.getElementById("inDate").value=today();
+document.getElementById("fundName").addEventListener("change",async e=>{ if(!canEdit())return; state.name=e.target.value||"我的基金"; await persist(); });
+document.getElementById("addBtn").onclick=async()=>{
+  if(saving)return;
+  const date=document.getElementById("inDate").value, val=parseFloat(document.getElementById("inVal").value);
+  if(!date){alert("请选择日期");return;} if(isNaN(val)){alert("请输入净值/金额");return;}
+  const i=state.records.findIndex(r=>r.date===date); if(i>=0)state.records[i].val=val; else state.records.push({date,val});
+  document.getElementById("inVal").value=""; render(); await persist();
+};
+document.getElementById("clearBtn").onclick=async()=>{ if(saving)return; if(confirm("确定清空全部记录？不可恢复。")){state.records=[];render();await persist();} };
+document.getElementById("exportBtn").onclick=()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=(state.name||"基金")+"_备份.json";a.click();};
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=e=>{const f=e.target.files[0];if(!f)return;const fr=new FileReader();fr.onload=async()=>{try{const s=JSON.parse(fr.result);if(s&&Array.isArray(s.records)){state=s;render();await persist();alert("导入成功");}else alert("文件格式不对");}catch(err){alert("文件解析失败");}};fr.readAsText(f);};
+
+/* 管理面板 */
+document.getElementById("adminBtn").onclick=()=>{const p=document.getElementById("adminPanel");p.style.display=p.style.display==="block"?"none":"block";};
+function syncAdminUI(){
+  document.getElementById("logoutBtn").style.display = (CLOUD&&token)?"inline-block":"none";
+  document.getElementById("adminMsg").textContent = !CLOUD?"当前是本地模式，无需密钥。配置上线后再使用。":(token?"✅ 已解锁编辑（密钥仅存于本机）":"未解锁，当前只读。");
+}
+document.getElementById("unlockBtn").onclick=async()=>{
+  const t=document.getElementById("tokenInput").value.trim();
+  if(!CLOUD){alert("当前是本地模式，还没配置云端。请先按《上线指南》填好仓库信息并上线。");return;}
+  if(!t){alert("请粘贴 Token");return;}
+  token=t; document.getElementById("adminMsg").textContent="正在验证…";
+  try{ await cloudLoad(); localStorage.setItem(TKEY,t); document.getElementById("tokenInput").value="";
+       setStatus("ok","☁ 已连接 · 可编辑"); syncAdminUI(); refreshSubhint(); render();
+       alert("解锁成功，现在可以编辑了。"); }
+  catch(e){ token=""; document.getElementById("adminMsg").textContent="❌ 验证失败："+e.message; }
+};
+document.getElementById("logoutBtn").onclick=()=>{ token=""; localStorage.removeItem(TKEY); syncAdminUI(); refreshSubhint(); render(); setStatus("ok","☁ 已连接 · 只读"); };
+
+window.addEventListener("resize",()=>{drawChart([...state.records].sort((a,b)=>a.date<b.date?-1:1)); renderMine();});
+
+/* ---------- 启动 ---------- */
+(async function init(){
+  if(!CLOUD){ setStatus("warn","本地模式"); state=localLoad()||state; }
+  else{
+    setStatus("warn","连接云端中…");
+    try{ state=await cloudLoad(); localSave(); setStatus("ok", token?"☁ 已连接 · 可编辑":"☁ 已连接 · 只读"); }
+    catch(e){ const c=localLoad(); if(c){state=c; setStatus("err","云端读取失败，显示本机缓存");} else setStatus("err","云端读取失败："+e.message); }
+  }
+  syncAdminUI(); refreshSubhint(); render();
+})();
+</script>
+</body>
+</html>
