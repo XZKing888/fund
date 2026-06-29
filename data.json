@@ -1,6 +1,11 @@
 {
   "name": "我的基金",
-  "records": [],
+  "records": [
+    {
+      "date": "2026-06-29",
+      "val": 105152.4
+    }
+  ],
   "fee": {
     "type": "performance",
     "perfRate": 20,
