@@ -14,6 +14,8 @@
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);padding:24px;line-height:1.5;}
   .wrap{max-width:1000px;margin:0 auto;}
+  body.personal .wrap > :not(#personalView){display:none !important;}
+  body.personal #personalView{display:block !important;}
   header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px;}
   #fundName{font-size:26px;font-weight:700;background:transparent;border:none;color:var(--text);border-bottom:2px dashed transparent;padding:2px 4px;min-width:160px;}
   #fundName:focus{outline:none;border-bottom-color:var(--accent);}
@@ -72,6 +74,7 @@
 </head>
 <body>
 <div class="wrap">
+  <div id="personalView" style="display:none;"></div>
   <header>
     <input id="fundName" value="我的基金" title="点击修改基金名称" readonly>
     <div class="spacer"></div>
@@ -189,6 +192,7 @@ const CLOUD = !!(O && R);                 // 配了 owner+repo 才启用云端
 const LKEY = "fund_tracker_v1";           // 本地缓存
 const TKEY = "fund_github_token";         // 你的密钥（仅本机）
 const MKEY = "fund_my_position";           // 我的本金/入场日（每个查看者各自本机）
+const PID = new URLSearchParams(location.search).get("id");  // 专属链接里的投资人标识
 let token = CLOUD ? (localStorage.getItem(TKEY)||"") : "";
 let state = { name:"我的基金", records:[] };
 let saving = false;
@@ -357,7 +361,7 @@ document.getElementById("feeSaveBtn").onclick=async()=>{
 function computeRoster(){
   const recs=[...state.records].sort((a,b)=>a.date<b.date?-1:1);
   const deps=[...(state.investors||[])].sort((a,b)=>a.date<b.date?-1:(a.date>b.date?1:0));
-  if(!recs.length||!deps.length) return {recs,deps,people:[],navLatest:null,unitsTotal:0,fee:state.fee||{type:"none"}};
+  if(!recs.length||!deps.length) return {recs,deps,alloc:[],people:[],navLatest:null,unitsTotal:0,fee:state.fee||{type:"none"}};
   const lastDate=recs[recs.length-1].date;
   const valueOn=d=>{ let v=null; for(const r of recs){ if(r.date<=d) v=r.val; } return v==null?recs[0].val:v; };
   // 按入金日期分批折算份额：当天净值 = (入金日账户总额 − 当天新入金) / 已有份额
@@ -372,9 +376,10 @@ function computeRoster(){
   }
   const navLatest = units>0 ? recs[recs.length-1].val/units : 1;
   const fee=state.fee||{type:"none"};
-  const map={};
+  const map={}, alloc=[];
   deps.forEach(dep=>{ const nav=navByDate[dep.date]||1, u=(Number(dep.amount)||0)/nav;
-    const n=dep.name||"(未命名)"; if(!map[n])map[n]={name:n,deposit:0,units:0,firstDate:dep.date};
+    alloc.push({name:dep.name||"(未命名)",pid:dep.pid,amount:Number(dep.amount)||0,date:dep.date,units:u});
+    const n=dep.name||"(未命名)"; if(!map[n])map[n]={name:n,pid:dep.pid,deposit:0,units:0,firstDate:dep.date};
     map[n].deposit+=Number(dep.amount)||0; map[n].units+=u; if(dep.date<map[n].firstDate)map[n].firstDate=dep.date; });
   const people=Object.values(map).map(p=>{
     const mv=p.units*navLatest, gross=mv-p.deposit;
@@ -386,11 +391,19 @@ function computeRoster(){
     const totalFee=mgmt+perf, net=gross-totalFee;
     return {...p,mv,gross,totalFee,net,grossPct:p.deposit?gross/p.deposit*100:0,netPct:p.deposit?net/p.deposit*100:0};
   }).sort((a,b)=>a.name<b.name?-1:1);
-  return {recs,deps,people,navLatest,unitsTotal:units,fee};
+  return {recs,deps,alloc,people,navLatest,unitsTotal:units,fee};
+}
+function ensurePids(){
+  if(!Array.isArray(state.investors)) return false;
+  const byName={}; let changed=false;
+  state.investors.forEach(d=>{ if(d.pid&&!byName[d.name]) byName[d.name]=d.pid; });
+  state.investors.forEach(d=>{ if(!d.pid){ if(!byName[d.name]) byName[d.name]=Math.random().toString(36).slice(2,10); d.pid=byName[d.name]; changed=true; } });
+  return changed;
 }
 function renderRoster(){
   const box=document.getElementById("rosterResult"); if(!box) return;
   const id=document.getElementById("invDate"); if(id&&id.value===""&&document.activeElement!==id) id.value=today();
+  if(ensurePids() && canEdit() && !saving) persist();
   const invs=state.investors||[];
   const {people,navLatest,fee}=computeRoster();
   const feeOn=!!(fee&&fee.type&&fee.type!=="none");
@@ -406,21 +419,23 @@ function renderRoster(){
     html+=`<div class="hint" style="margin:10px 0 6px;">盈亏汇总 · 当前单位净值 ${navLatest.toFixed(4)}（基准 1.0000）${feeOn?" · 已按收费设置扣费":""}</div>`;
     html+=`<table><thead><tr><th>姓名</th><th>累计入金</th><th>当前市值</th>`;
     html+= feeOn ? `<th>税前盈亏</th><th>费用</th><th>实得盈亏</th><th>实得%</th>` : `<th>盈亏</th><th>盈亏%</th>`;
-    html+=`</tr></thead><tbody>`;
+    html+=`<th>专属链接</th></tr></thead><tbody>`;
     let tDep=0,tMv=0,tGross=0,tFee=0,tNet=0;
     people.forEach(p=>{ tDep+=p.deposit;tMv+=p.mv;tGross+=p.gross;tFee+=p.totalFee;tNet+=p.net;
       html+=`<tr><td>${p.name}</td><td>${fmt(p.deposit)}</td><td>${fmt(p.mv)}</td>`;
       if(feeOn){ html+=`<td class="${cls(p.gross)}">${sign(p.gross)}</td><td class="${p.totalFee>0?'down':'flat'}">${p.totalFee>0?'-'+fmt(p.totalFee):fmt(0)}</td><td class="${cls(p.net)}">${sign(p.net)}</td><td class="${cls(p.net)}">${signPct(p.netPct)}</td>`; }
       else { html+=`<td class="${cls(p.gross)}">${sign(p.gross)}</td><td class="${cls(p.gross)}">${signPct(p.grossPct)}</td>`; }
-      html+=`</tr>`; });
+      html+=`<td><button class="mini" data-link="${p.pid||''}">复制链接</button></td></tr>`; });
     html+=`<tr style="font-weight:700;"><td>合计</td><td>${fmt(tDep)}</td><td>${fmt(tMv)}</td>`;
     html+= feeOn ? `<td class="${cls(tGross)}">${sign(tGross)}</td><td class="${tFee>0?'down':'flat'}">${tFee>0?'-'+fmt(tFee):fmt(0)}</td><td class="${cls(tNet)}">${sign(tNet)}</td><td>—</td>` : `<td class="${cls(tGross)}">${sign(tGross)}</td><td>—</td>`;
-    html+=`</tr></tbody></table>`;
+    html+=`<td></td></tr></tbody></table>`;
   } else if(invs.length){
     html+=`<p class="hint">基金还没有净值记录，先在「新增/更新记录」里填入账户总资产，这里就会自动算出每个人的盈亏。</p>`;
   }
   box.innerHTML=html;
   box.querySelectorAll("[data-invdel]").forEach(b=>b.onclick=async()=>{ if(saving)return; state.investors.splice(+b.dataset.invdel,1); render(); await persist(); });
+  box.querySelectorAll("[data-link]").forEach(b=>b.onclick=()=>{ const url=location.origin+location.pathname+"?id="+b.dataset.link;
+    const t=b.textContent; (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(()=>{b.textContent="已复制!";},()=>{prompt("复制下面这个专属链接发给他：",url);}).finally(()=>setTimeout(()=>b.textContent=t,1500)); });
 }
 document.getElementById("invAddBtn").onclick=async()=>{
   if(saving)return;
@@ -431,10 +446,63 @@ document.getElementById("invAddBtn").onclick=async()=>{
   if(isNaN(amount)||amount<=0){alert("请输入入金额（大于 0）");return;}
   if(!date){alert("请选择入金日期");return;}
   if(!Array.isArray(state.investors))state.investors=[];
-  state.investors.push({name,amount,date});
+  const ex=state.investors.find(x=>x.name===name);
+  const pid=ex?ex.pid:Math.random().toString(36).slice(2,10);
+  state.investors.push({name,amount,date,pid});
   document.getElementById("invName").value=""; document.getElementById("invAmount").value="";
   render(); await persist();
 };
+
+/* ---------- 专属页面（投资人凭 ?id= 链接查看自己）---------- */
+function renderPersonal(){
+  const pv=document.getElementById("personalView"); if(!pv) return;
+  const {recs,alloc,navLatest,fee}=computeRoster();
+  const mine=(alloc||[]).filter(a=>a.pid===PID);
+  if(!mine.length){ pv.innerHTML=`<div class="panel"><h2>专属页面</h2><p class="hint">链接无效，或你还没被登记。请向管理员确认你的专属链接。</p></div>`; return; }
+  const name=mine[0].name;
+  const firstDate=mine.reduce((m,a)=>a.date<m?a.date:m,mine[0].date);
+  const deposit=mine.reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const myUnits=mine.reduce((s,a)=>s+a.units,0);
+  const totalUnitsAsOf=d=>(alloc||[]).filter(a=>a.date<=d).reduce((s,a)=>s+a.units,0);
+  const myUnitsAsOf=d=>mine.filter(a=>a.date<=d).reduce((s,a)=>s+a.units,0);
+  const myDepAsOf=d=>mine.filter(a=>a.date<=d).reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const feeOn=!!(fee&&fee.type&&fee.type!=="none");
+  const lastDate=recs.length?recs[recs.length-1].date:firstDate;
+  function feeOf(gross,dep,days){ let mg=0,pf=0;
+    if(fee.type==="fixed"||fee.type==="both") mg=dep*(Number(fee.mgmtRate)||0)/100*days/365;
+    const pb=fee.type==="both"?Math.max(0,gross-mg):Math.max(0,gross);
+    if(fee.type==="performance"||fee.type==="both") pf=pb*(Number(fee.perfRate)||0)/100;
+    return {fee:mg+pf,net:gross-mg-pf}; }
+  const mv=myUnits*navLatest, gross=mv-deposit;
+  const days=Math.max(0,(new Date(lastDate)-new Date(firstDate))/86400000);
+  const f=feeOf(gross,deposit,days), net=f.net, totalFee=f.fee;
+  const grossPct=deposit?gross/deposit*100:0, netPct=deposit?net/deposit*100:0;
+  const series=recs.filter(r=>r.date>=firstDate).map(r=>{
+    const tu=totalUnitsAsOf(r.date)||1, nav=r.val/tu, m=myUnitsAsOf(r.date)*nav, dep2=myDepAsOf(r.date);
+    const dd=Math.max(0,(new Date(r.date)-new Date(firstDate))/86400000);
+    const ff=feeOf(m-dep2,dep2,dd); return {date:r.date,val:dep2+ff.net};
+  });
+  pv.innerHTML=`
+   <div style="margin-bottom:18px;">
+     <div style="font-size:26px;font-weight:700;">${name} 的收益</div>
+     <div class="subhint" style="margin:4px 0 0;">${state.name||"基金"} · 你的专属页面（只显示你自己）</div>
+   </div>
+   <div class="cards" style="margin-bottom:16px;">
+     <div class="card"><div class="label">我的累计入金</div><div class="value">${fmt(deposit)}</div></div>
+     <div class="card"><div class="label">当前市值${feeOn?"（税前）":""}</div><div class="value">${fmt(deposit+gross)}</div></div>
+     <div class="card"><div class="label">${feeOn?"实得盈亏":"盈亏"}</div><div class="value ${cls(feeOn?net:gross)}">${sign(feeOn?net:gross)}</div></div>
+     <div class="card"><div class="label">${feeOn?"实得收益率":"收益率"}</div><div class="value ${cls(feeOn?net:gross)}">${signPct(feeOn?netPct:grossPct)}</div></div>
+   </div>
+   ${feeOn?`<div class="cards" style="margin-bottom:16px;">
+     <div class="card"><div class="label">税前盈亏</div><div class="value ${cls(gross)}">${sign(gross)}</div></div>
+     <div class="card"><div class="label">管理费 / 分成</div><div class="value ${totalFee>0?'down':'flat'}">${totalFee>0?'-'+fmt(totalFee):fmt(0)}</div></div>
+     <div class="card"><div class="label">实得市值</div><div class="value">${fmt(deposit+net)}</div></div></div>`:""}
+   <div class="panel"><h2>我的份额走势（${feeOn?"扣费后实得市值":"市值"}）</h2>
+     <div style="position:relative;"><canvas id="pChart" height="300"></canvas><div id="pTip" style="position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;display:none;white-space:nowrap;transform:translate(-50%,-115%);"></div></div>
+     <p class="hint" style="margin-top:10px;">入金 ${firstDate} 起 · 当前单位净值 ${navLatest.toFixed(4)}（基准 1.0000）。数据由管理员更新，刷新即看最新。</p>
+   </div>`;
+  drawChart(series,"pChart","pTip");
+}
 
 /* ---------- 走势图（纯 canvas，无需联网）---------- */
 let chartPts=[];
@@ -497,7 +565,7 @@ document.getElementById("unlockBtn").onclick=async()=>{
 };
 document.getElementById("logoutBtn").onclick=()=>{ token=""; localStorage.removeItem(TKEY); syncAdminUI(); refreshSubhint(); render(); setStatus("ok","☁ 已连接 · 只读"); };
 
-window.addEventListener("resize",()=>{drawChart([...state.records].sort((a,b)=>a.date<b.date?-1:1)); renderMine();});
+window.addEventListener("resize",()=>{ if(document.body.classList.contains("personal")){renderPersonal();return;} drawChart([...state.records].sort((a,b)=>a.date<b.date?-1:1)); renderMine();});
 
 /* ---------- 启动 ---------- */
 (async function init(){
@@ -507,7 +575,8 @@ window.addEventListener("resize",()=>{drawChart([...state.records].sort((a,b)=>a
     try{ state=await cloudLoad(); localSave(); setStatus("ok", token?"☁ 已连接 · 可编辑":"☁ 已连接 · 只读"); }
     catch(e){ const c=localLoad(); if(c){state=c; setStatus("err","云端读取失败，显示本机缓存");} else setStatus("err","云端读取失败："+e.message); }
   }
-  syncAdminUI(); refreshSubhint(); render();
+  if(PID){ document.body.classList.add("personal"); renderPersonal(); }
+  else { syncAdminUI(); refreshSubhint(); render(); }
 })();
 </script>
 </body>
