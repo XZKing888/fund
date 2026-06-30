@@ -19,5 +19,10 @@
       "date": "2026-06-30",
       "pid": "6xn52h76"
     }
-  ]
+  ],
+  "fee": {
+    "type": "none",
+    "perfRate": 0,
+    "mgmtRate": 0
+  }
 }
